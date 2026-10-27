@@ -1,0 +1,1175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Video Deck</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" rel="stylesheet">
+<style>
+  /* Neutral grey surround, as in a grading suite: it doesn't bias how contrast and colour read.
+     Tungsten marks the video you start from, daylight marks the one being made, everywhere. */
+  :root {
+    --surround: #3b3c3f;
+    --deck: #2e2f32;
+    --well: #26272a;
+    --deck-edge: #48494d;
+    --ink: #ecebe8;
+    --ink-soft: #a9a8a4;
+    --tungsten: #f0b45c;
+    --daylight: #7cc7ea;
+    --alert: #f28b82;
+    --font: "Archivo", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flex; flex-direction: column;
+    background: var(--surround); color: var(--ink);
+    font: 400 15px/1.45 var(--font); font-variation-settings: "wdth" 100;
+  }
+  button, select, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px;
+    padding: 12px 20px; background: var(--deck); border-bottom: 1px solid var(--deck-edge);
+  }
+  h1 {
+    margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em;
+    font-variation-settings: "wdth" 125;
+  }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button {
+    border: 0; background: none; cursor: pointer; padding: 8px 14px; border-radius: 8px;
+    color: var(--ink-soft); font-weight: 500;
+  }
+  .tabs button:hover { color: var(--ink); background: var(--well); }
+  .tabs button[aria-current="page"] { color: var(--ink); background: var(--well); box-shadow: inset 0 -2px 0 var(--ink); }
+  .tabs .count {
+    display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 6px;
+    border-radius: 10px; background: var(--daylight); color: var(--deck); font-size: 12px; font-weight: 700;
+  }
+
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .screen { flex: 1; min-height: 0; }
+  #screen-compare { display: flex; flex-direction: column; }
+  .tool { overflow: auto; }
+
+  /* ---------- compare: source bar ---------- */
+  .compare-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px;
+    padding: 10px 20px; background: var(--deck); border-bottom: 1px solid var(--deck-edge);
+  }
+  .sources { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .source {
+    position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 300px;
+    padding: 6px 12px 6px 8px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--deck-edge); background: var(--well);
+  }
+  .source::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+  .source:hover { border-color: var(--c); }
+  .source:focus-within { outline: 2px solid var(--c); outline-offset: 2px; }
+  .source b { font-weight: 600; color: var(--c); }
+  .source span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
+  .source input, .zone input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .src-a, .zone-a { --c: var(--tungsten); } .src-b, .zone-b { --c: var(--daylight); }
+
+  .modes { display: flex; padding: 3px; gap: 2px; background: var(--well); border: 1px solid var(--deck-edge); border-radius: 10px; }
+  .modes button { border: 0; background: none; padding: 6px 14px; border-radius: 7px; cursor: pointer; color: var(--ink-soft); }
+  .modes button:hover { color: var(--ink); }
+  .modes button[aria-pressed="true"] { background: var(--ink); color: var(--deck); font-weight: 600; }
+
+  /* ---------- compare: stage ---------- */
+  #stage { position: relative; flex: 1; min-height: 260px; overflow: hidden; background: #000; user-select: none; touch-action: none; }
+  .view { position: absolute; inset: 0; overflow: hidden; }
+  .zoomer { position: absolute; inset: 0; transform-origin: 0 0; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .tag {
+    position: absolute; top: 12px; z-index: 5; pointer-events: none;
+    max-width: 45%; padding: 4px 10px; border-radius: 6px; background: rgba(20,20,22,.72);
+    font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    border-left: 3px solid var(--c);
+  }
+  #tagA { left: 12px; --c: var(--tungsten); }
+  #tagB { right: 12px; --c: var(--daylight); }
+  #stage.slider #viewB { clip-path: inset(0 0 0 var(--split, 50%)); }
+  #divider {
+    display: none; position: absolute; top: 0; bottom: 0; left: var(--split, 50%); z-index: 6;
+    width: 2px; margin-left: -1px; background: var(--ink); cursor: ew-resize;
+  }
+  #divider span {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 34px; height: 56px; border-radius: 17px; overflow: hidden; display: flex; box-shadow: 0 0 0 2px var(--ink);
+  }
+  #divider span::before, #divider span::after { content: ""; flex: 1; }
+  #divider span::before { background: var(--tungsten); }
+  #divider span::after { background: var(--daylight); }
+  #stage.slider #divider { display: block; }
+  #stage.side #viewA { right: 50%; }
+  #stage.side #viewB { left: 50%; border-left: 2px solid var(--surround); }
+  #stage.toggle #viewB, #stage.toggle #tagB { visibility: hidden; }
+  #stage.toggle.showB #viewB, #stage.toggle.showB #tagB { visibility: visible; }
+  #stage.toggle.showB #tagA { visibility: hidden; }
+  #stage.toggle #tagB { left: 12px; right: auto; }
+
+  #intake { position: absolute; inset: 0; z-index: 10; display: grid; grid-template-columns: 1fr 1fr; background: var(--surround); }
+  #intake.done { display: none; }
+  .zone {
+    position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px;
+    padding: clamp(20px, 4vw, 48px); cursor: pointer; overflow: hidden;
+    background: color-mix(in srgb, var(--c) 9%, var(--surround));
+    border: 2px dashed transparent; transition: background-color .2s, border-color .2s;
+  }
+  .zone + .zone { border-left: 2px solid var(--deck); }
+  .zone:hover, .zone.over { background: color-mix(in srgb, var(--c) 18%, var(--surround)); }
+  .zone.over { border: 2px dashed var(--c); }
+  .zone:focus-within { outline: 3px solid var(--c); outline-offset: -6px; }
+  .zone h2 {
+    margin: 0; color: var(--c); line-height: .9; letter-spacing: -0.02em;
+    font-size: clamp(44px, 9vw, 132px); font-weight: 800; font-variation-settings: "wdth" 125;
+  }
+  .zone p { margin: 0; max-width: 34ch; color: var(--ink-soft); font-size: 16px; }
+  .zone .file { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+  .zone.loaded h2::after { content: " ✓"; font-size: .45em; vertical-align: middle; }
+  #intake-note {
+    position: absolute; top: 18px; left: 50%; transform: translateX(-50%); z-index: 2;
+    padding: 6px 14px; border-radius: 999px; background: var(--deck); color: var(--ink-soft);
+    font-size: 13px; white-space: nowrap; pointer-events: none;
+  }
+
+  /* ---------- compare: transport ---------- */
+  .transport-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    padding: 12px 20px; background: var(--deck); border-top: 1px solid var(--deck-edge);
+  }
+  .transport { display: flex; gap: 6px; }
+  .btn {
+    display: inline-grid; place-items: center; min-width: 40px; height: 40px; padding: 0 12px;
+    border-radius: 8px; border: 1px solid var(--deck-edge); background: var(--well); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--ink-soft); }
+  .btn.play { min-width: 52px; background: var(--ink); color: var(--deck); border-color: var(--ink); }
+  .btn svg { width: 18px; height: 18px; fill: currentColor; }
+  #tc { font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; letter-spacing: 0.01em; font-variation-settings: "wdth" 112; }
+  #tc small { font-size: 14px; color: var(--ink-soft); font-weight: 400; margin-left: 6px; font-variation-settings: "wdth" 100; }
+  #seek { flex: 1 1 240px; min-width: 160px; height: 28px; accent-color: var(--ink); cursor: pointer; }
+  .settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--ink-soft); font-size: 13px; }
+  .settings label { display: flex; align-items: center; gap: 6px; }
+  .settings select, .settings input { background: var(--well); border: 1px solid var(--deck-edge); border-radius: 6px; padding: 5px 8px; color: var(--ink); }
+  .settings input { width: 72px; }
+  #resetZoom { height: 30px; font-size: 13px; }
+  .keys { width: 100%; margin: 0; color: var(--ink-soft); font-size: 12.5px; }
+  kbd { font: inherit; font-size: 11.5px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--deck-edge); border-bottom-width: 2px; color: var(--ink); }
+
+  /* ---------- convert / enhance ---------- */
+  .tool-grid {
+    display: grid; grid-template-columns: minmax(0, 620px) minmax(300px, 1fr); align-items: start;
+    gap: 40px 56px; max-width: 1320px; padding: 36px clamp(16px, 4vw, 48px) 56px;
+  }
+  .setup { display: flex; flex-direction: column; gap: 28px; }
+  .tool-intro h2 {
+    margin: 0 0 6px; font-size: clamp(34px, 5vw, 48px); line-height: 1; font-weight: 800;
+    letter-spacing: -0.02em; font-variation-settings: "wdth" 125;
+  }
+  .tool-intro p { margin: 0; color: var(--ink-soft); max-width: 58ch; }
+
+  .slate {
+    display: flex; align-items: center; gap: 16px; padding: 16px 18px;
+    background: var(--deck); border: 1px solid var(--deck-edge); border-left: 5px solid var(--c); border-radius: 4px 10px 10px 4px;
+  }
+  .slate-in { --c: var(--tungsten); } .slate-out { --c: var(--daylight); }
+  .slate-body { flex: 1; min-width: 0; }
+  .slate-name {
+    font-size: 20px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere;
+    font-variation-settings: "wdth" 112;
+  }
+  .slate-name.empty { color: var(--ink-soft); font-weight: 500; }
+  .slate-meta { margin-top: 3px; color: var(--ink-soft); font-size: 14px; overflow-wrap: anywhere; }
+  .slate-meta.error { color: var(--alert); }
+  .slate .btn { flex: none; height: 38px; }
+  .flow-arrow { margin: -18px 0 -18px 22px; height: 28px; width: 2px; background: linear-gradient(var(--tungsten), var(--daylight)); }
+
+  fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+  legend { padding: 0; margin-bottom: 10px; font-weight: 600; }
+  .field-note { margin: 8px 0 0; color: var(--ink-soft); font-size: 13.5px; }
+  .field-note.warn { color: var(--alert); }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pills label, .choices label { position: relative; cursor: pointer; }
+  .pills input, .choices input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .pills span {
+    display: block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--deck-edge); background: var(--well);
+    font-weight: 600; text-align: center;
+  }
+  .pills span small { display: block; font-weight: 400; font-size: 12px; color: var(--ink-soft); }
+  .pills label:hover span, .choices label:hover span { border-color: var(--ink-soft); }
+  .pills input:checked + span, .choices input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--deck); }
+  .pills input:checked + span small, .choices input:checked + span small { color: #55565a; }
+  .pills input:focus-visible + span, .choices input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .pills input:disabled + span, .choices input:disabled + span { opacity: .35; cursor: not-allowed; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .choices span {
+    display: block; height: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--deck-edge); background: var(--well);
+    font-weight: 600;
+  }
+  .choices span small { display: block; margin-top: 2px; font-weight: 400; font-size: 13px; color: var(--ink-soft); }
+  .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  .check input { margin-top: 4px; width: 16px; height: 16px; accent-color: var(--ink); }
+  .check small { display: block; color: var(--ink-soft); font-size: 13px; }
+
+  .dest-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    max-width: 240px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--deck-edge); background: none;
+    color: var(--ink-soft); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--ink-soft); }
+  .chip[aria-pressed="true"] { color: var(--deck); background: var(--daylight); border-color: var(--daylight); font-weight: 600; }
+
+  .go-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+  .go {
+    padding: 14px 24px; border-radius: 10px; border: 0; background: var(--ink); color: var(--deck);
+    font-weight: 700; font-size: 16px; cursor: pointer; font-variation-settings: "wdth" 112;
+  }
+  .go:hover { background: #fff; }
+  .go:disabled { opacity: .4; cursor: not-allowed; }
+  .go-msg { color: var(--ink-soft); font-size: 14px; }
+  .go-msg.error { color: var(--alert); }
+
+  .offline { max-width: 640px; margin: 48px clamp(16px, 4vw, 48px); padding: 22px 24px; background: var(--deck); border-left: 5px solid var(--alert); border-radius: 4px 10px 10px 4px; }
+  .offline h2 { margin: 0 0 8px; font-size: 22px; font-variation-settings: "wdth" 112; }
+  .offline p { margin: 0 0 8px; color: var(--ink-soft); }
+  .offline code { display: block; margin-top: 10px; padding: 10px 12px; background: var(--well); border-radius: 6px; color: var(--ink); overflow-wrap: anywhere; font-size: 13.5px; }
+
+  /* ---------- queue ---------- */
+  .queue { position: sticky; top: 0; }
+  .queue h2 { margin: 6px 0 14px; font-size: 20px; font-variation-settings: "wdth" 112; }
+  .jobs { display: flex; flex-direction: column; gap: 12px; }
+  .jobs-empty { margin: 0; padding: 18px; border: 1px dashed var(--deck-edge); border-radius: 10px; color: var(--ink-soft); }
+  .job {
+    padding: 14px 18px 16px; background: var(--deck); border: 1px solid var(--deck-edge);
+    border-left: 4px solid var(--deck-edge); border-radius: 4px 10px 10px 4px;
+  }
+  .job.running { border-left-color: var(--daylight); }
+  .job.done { border-left-color: var(--daylight); }
+  .job.failed { border-left-color: var(--alert); }
+  .job-head { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+  .job-status { flex: 1; font-weight: 600; }
+  .job.failed .job-status { color: var(--alert); }
+  .job.canceled .job-status, .job.queued .job-status { color: var(--ink-soft); }
+  .job-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .job-actions button {
+    padding: 5px 10px; border-radius: 7px; border: 1px solid var(--deck-edge); background: var(--well);
+    font-size: 13px; cursor: pointer;
+  }
+  .job-actions button:hover { border-color: var(--ink-soft); }
+  .job-actions .primary { background: var(--ink); color: var(--deck); border-color: var(--ink); font-weight: 600; }
+  .job-files { margin-top: 8px; display: grid; gap: 2px; font-size: 14px; }
+  .job-files span { padding-left: 10px; border-left: 3px solid var(--c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-files .in { --c: var(--tungsten); color: var(--ink-soft); }
+  .job-files .out { --c: var(--daylight); }
+  .readout { display: flex; align-items: baseline; gap: 14px; margin-top: 12px; }
+  .pct {
+    font-size: 46px; line-height: 1; font-weight: 800; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums; font-variation-settings: "wdth" 125;
+  }
+  .pct small { font-size: .45em; font-weight: 600; margin-left: 2px; }
+  .job.queued .pct, .job.canceled .pct { color: var(--ink-soft); }
+  .eta { color: var(--ink-soft); font-size: 14px; }
+  .meter { margin-top: 10px; height: 6px; border-radius: 3px; background: var(--well); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--daylight); border-radius: 3px; transition: width .6s linear; }
+  .job.failed .meter i, .job.canceled .meter i { background: var(--ink-soft); }
+  .steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; counter-reset: step; }
+  .steps li { display: flex; gap: 8px; color: var(--ink-soft); counter-increment: step; }
+  .steps li::before {
+    content: counter(step); flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+    border: 1px solid var(--deck-edge); font-size: 11.5px; font-weight: 700;
+  }
+  .steps li.running { color: var(--ink); font-weight: 600; }
+  .steps li.running::before { border-color: var(--daylight); color: var(--daylight); }
+  .steps li.done::before { content: "✓"; background: var(--daylight); border-color: var(--daylight); color: var(--deck); }
+  .steps li span { font-weight: 400; color: var(--ink-soft); }
+  .job-detail { margin: 8px 0 0; color: var(--ink-soft); font-size: 13.5px; }
+  .job-error { margin: 10px 0 0; color: var(--alert); font-size: 14px; overflow-wrap: anywhere; }
+
+  /* ---------- folder and file picker ---------- */
+  dialog#picker {
+    width: min(780px, calc(100vw - 32px)); height: min(580px, calc(100vh - 48px)); padding: 0;
+    background: var(--deck); color: var(--ink); border: 1px solid var(--deck-edge); border-radius: 14px;
+  }
+  dialog#picker::backdrop { background: rgba(0, 0, 0, .55); }
+  .pk { display: flex; flex-direction: column; height: 100%; }
+  .pk-top { padding: 18px 20px 12px; border-bottom: 1px solid var(--deck-edge); }
+  .pk-top h2 { margin: 0 0 12px; font-size: 20px; font-variation-settings: "wdth" 112; }
+  .pk-path { display: flex; gap: 6px; }
+  .pk-path input { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--deck-edge); background: var(--well); }
+  .pk-path .btn { height: 36px; min-width: 36px; }
+  .pk-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 180px 1fr; }
+  .pk-places { padding: 12px 10px; border-right: 1px solid var(--deck-edge); overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+  .pk-places p { margin: 12px 8px 4px; font-size: 12.5px; color: var(--ink-soft); }
+  .pk-places p:first-child { margin-top: 0; }
+  .pk-places button {
+    text-align: left; padding: 6px 8px; border: 0; border-radius: 6px; background: none; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pk-places button:hover { background: var(--well); }
+  .pk-list { list-style: none; margin: 0; padding: 8px; overflow: auto; }
+  .pk-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px;
+    background: none; text-align: left; cursor: pointer;
+  }
+  .pk-item:hover { background: var(--well); }
+  .pk-item svg { flex: none; width: 18px; height: 18px; fill: var(--ink-soft); }
+  .pk-item.file svg { fill: var(--tungsten); }
+  .pk-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pk-item small { color: var(--ink-soft); }
+  .pk-item[aria-selected="true"] { background: var(--ink); color: var(--deck); }
+  .pk-item[aria-selected="true"] small, .pk-item[aria-selected="true"] svg { color: var(--deck); fill: var(--deck); }
+  .pk-empty { padding: 16px 10px; color: var(--ink-soft); }
+  .pk-msg { padding: 0 20px; color: var(--alert); font-size: 14px; }
+  .pk-msg:empty { display: none; }
+  .pk-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--deck-edge); }
+  .pk-foot .spacer { flex: 1; }
+  .pk-foot .go { padding: 10px 18px; font-size: 15px; }
+
+  @media (max-width: 900px) {
+    .tool-grid { grid-template-columns: 1fr; padding-top: 24px; }
+    .queue { position: static; }
+  }
+  @media (max-width: 640px) {
+    .topbar, .compare-bar, .transport-bar { padding-left: 16px; padding-right: 16px; }
+    #intake { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .zone + .zone { border-left: 0; border-top: 2px solid var(--deck); }
+    #intake-note { display: none; }
+    #tc { font-size: 20px; }
+    .choices { grid-template-columns: 1fr; }
+    .slate { flex-wrap: wrap; }
+    .pk-body { grid-template-columns: 1fr; }
+    .pk-places { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--deck-edge); }
+    .pk-places p { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>Local Video Deck</h1>
+  <nav class="tabs" aria-label="Tools">
+    <button data-screen="compare" aria-current="page">Compare</button>
+    <button data-screen="convert">Convert</button>
+    <button data-screen="enhance">Enhance</button>
+  </nav>
+</header>
+
+<main>
+<!-- ================= Compare ================= -->
+<section class="screen" id="screen-compare">
+  <div class="compare-bar">
+    <div class="sources">
+      <label class="source src-a"><b>Original</b><span id="nameA">No file yet</span><input type="file" accept="video/*,.mkv" data-k="A"></label>
+      <label class="source src-b"><b>Enhanced</b><span id="nameB">No file yet</span><input type="file" accept="video/*,.mkv" data-k="B"></label>
+    </div>
+    <div class="modes" role="group" aria-label="Comparison view">
+      <button data-mode="slider" aria-pressed="true">Slider</button>
+      <button data-mode="side" aria-pressed="false">Side by side</button>
+      <button data-mode="toggle" aria-pressed="false">Flip</button>
+    </div>
+  </div>
+
+  <div id="stage" class="slider">
+    <div class="view" id="viewA"><div class="zoomer"><video id="A" playsinline preload="auto"></video></div></div>
+    <div class="view" id="viewB"><div class="zoomer"><video id="B" playsinline preload="auto" muted></video></div></div>
+    <div class="tag" id="tagA">Original</div>
+    <div class="tag" id="tagB">Enhanced</div>
+    <div id="divider" aria-hidden="true"><span></span></div>
+
+    <div id="intake">
+      <div id="intake-note">Files stay on this computer. Nothing is uploaded.</div>
+      <label class="zone zone-a" data-k="A">
+        <input type="file" accept="video/*,.mkv" data-k="A">
+        <h2>Original</h2>
+        <p>Drop the source video here, or click to choose it. It shows on the left.</p>
+      </label>
+      <label class="zone zone-b" data-k="B">
+        <input type="file" accept="video/*,.mkv" data-k="B">
+        <h2>Enhanced</h2>
+        <p>Drop your enhanced version here, or click to choose it. It shows on the right.</p>
+      </label>
+    </div>
+  </div>
+
+  <div class="transport-bar">
+    <div class="transport">
+      <button class="btn" id="back" aria-label="Previous frame"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button class="btn play" id="play" aria-label="Play"><svg viewBox="0 0 24 24"><path id="playIcon" d="M7 4v16l13-8z"/></svg></button>
+      <button class="btn" id="fwd" aria-label="Next frame"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    </div>
+    <div id="tc">00:00:00:00<small>of 00:00:00:00</small></div>
+    <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Position">
+    <div class="settings">
+      <label>Speed
+        <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+      </label>
+      <label>Frame rate
+        <select id="fps"><option>23.976</option><option>24</option><option>25</option><option selected>30</option><option>50</option><option>60</option></select>
+      </label>
+      <label>Sound from
+        <select id="audio"><option value="A">Original</option><option value="B">Enhanced</option><option value="none">Neither</option></select>
+      </label>
+      <label title="Shift the enhanced video if it starts a little earlier or later than the original">Delay enhanced by
+        <input type="number" id="offset" value="0" step="0.01"> s
+      </label>
+      <button class="btn" id="resetZoom" hidden>Reset zoom</button>
+    </div>
+    <p class="keys"><kbd>Space</kbd> play or pause &nbsp; <kbd>←</kbd> <kbd>→</kbd> step one frame &nbsp; <kbd>F</kbd> flip between versions &nbsp; Scroll to zoom, drag to look around</p>
+  </div>
+</section>
+
+<!-- ================= Convert ================= -->
+<section class="screen tool" id="screen-convert" hidden>
+  <div class="offline" hidden>
+    <h2>Start the helper to convert videos</h2>
+    <p>Converting runs ffmpeg on this computer, so it needs the helper that comes with Local Video Deck. Open a terminal in the Local Video Deck folder, run this, then use the page it opens:</p>
+    <code>./start.sh</code>
+  </div>
+  <div class="tool-grid">
+    <form class="setup" id="form-convert" data-kind="convert">
+      <div class="tool-intro">
+        <h2>Convert</h2>
+        <p>Make a smaller copy of a video, like 4K down to 1080p. The original file isn't changed.</p>
+      </div>
+      <p class="field-note warn" data-role="problem" hidden></p>
+
+      <div class="slate slate-in">
+        <div class="slate-body"><div class="slate-name empty">No video chosen</div><div class="slate-meta">Choose the video you want to convert.</div></div>
+        <button type="button" class="btn" data-act="pick-input">Choose video</button>
+      </div>
+
+      <fieldset>
+        <legend>New size</legend>
+        <div class="pills">
+          <label><input type="radio" name="convert-height" value="2160"><span>4K<small>2160p</small></span></label>
+          <label><input type="radio" name="convert-height" value="1440"><span>1440p<small>2K</small></span></label>
+          <label><input type="radio" name="convert-height" value="1080" checked><span>1080p<small>Full HD</small></span></label>
+          <label><input type="radio" name="convert-height" value="720"><span>720p<small>HD</small></span></label>
+          <label><input type="radio" name="convert-height" value="480"><span>480p<small>SD</small></span></label>
+        </div>
+        <p class="field-note" data-role="size-note" hidden>Sizes bigger than the original are turned off. Use Enhance to make a video bigger.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Format</legend>
+        <div class="choices">
+          <label><input type="radio" name="convert-codec" value="h264" checked><span>H.264<small>Plays on every device and website</small></span></label>
+          <label><input type="radio" name="convert-codec" value="hevc"><span>H.265<small>Smaller file at the same quality, newer devices</small></span></label>
+        </div>
+        <p class="field-note" data-role="encoder-note"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Quality</legend>
+        <div class="pills">
+          <label><input type="radio" name="convert-quality" value="best"><span>Best<small>biggest file</small></span></label>
+          <label><input type="radio" name="convert-quality" value="balanced" checked><span>Balanced<small>recommended</small></span></label>
+          <label><input type="radio" name="convert-quality" value="small"><span>Smallest<small>some detail lost</small></span></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Save to</legend>
+        <div class="slate slate-out">
+          <div class="slate-body"><div class="slate-name empty">Choose a video to see the new file name</div><div class="slate-meta"></div></div>
+          <button type="button" class="btn" data-act="pick-dest">Change folder</button>
+        </div>
+        <div class="dest-chips" aria-label="Folders you've saved to before"></div>
+      </fieldset>
+
+      <div class="go-row">
+        <button class="go" type="submit" disabled>Convert to 1080p</button>
+        <span class="go-msg" role="status"></span>
+      </div>
+    </form>
+
+    <aside class="queue" aria-labelledby="queue-h-convert">
+      <h2 id="queue-h-convert">Queue</h2>
+      <div class="jobs"></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= Enhance ================= -->
+<section class="screen tool" id="screen-enhance" hidden>
+  <div class="offline" hidden>
+    <h2>Start the helper to enhance videos</h2>
+    <p>Enhancing runs Real-ESRGAN on your graphics card, so it needs the helper that comes with Local Video Deck. Open a terminal in the Local Video Deck folder, run this, then use the page it opens:</p>
+    <code>./start.sh</code>
+  </div>
+  <div class="tool-grid">
+    <form class="setup" id="form-enhance" data-kind="enhance">
+      <div class="tool-intro">
+        <h2>Enhance</h2>
+        <p>Upscale a video with Real-ESRGAN on your graphics card for a bigger, sharper picture. Long videos can take hours.</p>
+        <p class="field-note" data-role="gpu-note"></p>
+      </div>
+      <p class="field-note warn" data-role="problem" hidden></p>
+
+      <div class="slate slate-in">
+        <div class="slate-body"><div class="slate-name empty">No video chosen</div><div class="slate-meta">Choose the video you want to enhance.</div></div>
+        <button type="button" class="btn" data-act="pick-input">Choose video</button>
+      </div>
+
+      <fieldset>
+        <legend>What's in the video</legend>
+        <div class="choices">
+          <label><input type="radio" name="enhance-model" value="real" checked><span>Real footage<small>Best detail for film and camera video. Slow.</small></span></label>
+          <label><input type="radio" name="enhance-model" value="anime"><span>Anime and cartoons<small>Clean lines and flat colour. Much faster.</small></span></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Make it bigger by</legend>
+        <div class="pills">
+          <label><input type="radio" name="enhance-scale" value="2" checked><span>2×</span></label>
+          <label><input type="radio" name="enhance-scale" value="3"><span>3×</span></label>
+          <label><input type="radio" name="enhance-scale" value="4"><span>4×</span></label>
+        </div>
+        <p class="field-note" data-role="scale-note"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Quality</legend>
+        <div class="pills">
+          <label><input type="radio" name="enhance-quality" value="best"><span>Best<small>biggest file</small></span></label>
+          <label><input type="radio" name="enhance-quality" value="balanced" checked><span>Balanced<small>recommended</small></span></label>
+          <label><input type="radio" name="enhance-quality" value="small"><span>Smaller<small>some detail lost</small></span></label>
+        </div>
+      </fieldset>
+
+      <label class="check">
+        <input type="checkbox" name="enhance-lowMemory">
+        <span>Use less graphics memory<small>Slower. Turn this on if enhancing stops with a memory error.</small></span>
+      </label>
+
+      <fieldset>
+        <legend>Save to</legend>
+        <div class="slate slate-out">
+          <div class="slate-body"><div class="slate-name empty">Choose a video to see the new file name</div><div class="slate-meta"></div></div>
+          <button type="button" class="btn" data-act="pick-dest">Change folder</button>
+        </div>
+        <div class="dest-chips" aria-label="Folders you've saved to before"></div>
+        <p class="field-note" data-role="space-note" hidden></p>
+      </fieldset>
+
+      <div class="go-row">
+        <button class="go" type="submit" disabled>Enhance video</button>
+        <span class="go-msg" role="status"></span>
+      </div>
+    </form>
+
+    <aside class="queue" aria-labelledby="queue-h-enhance">
+      <h2 id="queue-h-enhance">Queue</h2>
+      <div class="jobs"></div>
+    </aside>
+  </div>
+</section>
+</main>
+
+<dialog id="picker">
+  <form method="dialog" class="pk">
+    <div class="pk-top">
+      <h2 id="pkTitle">Choose a folder</h2>
+      <div class="pk-path">
+        <button type="button" class="btn" id="pkUp" aria-label="Up one folder" title="Up one folder"><svg viewBox="0 0 24 24"><path d="M12 5l7 7h-4v7H9v-7H5z"/></svg></button>
+        <input id="pkPath" spellcheck="false" aria-label="Folder path">
+        <button type="button" class="btn" id="pkGo">Open</button>
+      </div>
+    </div>
+    <div class="pk-body">
+      <nav class="pk-places" id="pkPlaces" aria-label="Places"></nav>
+      <ul class="pk-list" id="pkList" role="listbox" aria-label="Folder contents"></ul>
+    </div>
+    <p class="pk-msg" id="pkMsg" role="alert"></p>
+    <div class="pk-foot">
+      <button type="button" class="btn" id="pkNew">New folder</button>
+      <span class="spacer"></span>
+      <button class="btn" value="cancel">Cancel</button>
+      <button type="button" class="go" id="pkOk">Save here</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const baseName = p => p.split('/').filter(Boolean).pop() || p;
+const fmtBytes = b => b >= 1e9 ? (b / 1e9).toFixed(b >= 1e11 ? 0 : 1) + ' GB' : b >= 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 60) return s + ' s';
+  const m = Math.round(s / 60);
+  return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+}
+function fmtLength(s) {
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+const fileUrl = p => '/api/file?path=' + encodeURIComponent(p);
+
+/* =================== screens =================== */
+let currentScreen = 'compare';
+function showScreen(name) {
+  currentScreen = name;
+  $$('.screen').forEach(s => s.hidden = s.id !== 'screen-' + name);
+  $$('.tabs button').forEach(b => b.dataset.screen === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
+  try { localStorage.setItem('screen', name); } catch {}
+}
+$('.tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showScreen(b.dataset.screen); });
+
+/* =================== compare =================== */
+const A = $('#A'), B = $('#B');
+const stage = $('#stage'), intake = $('#intake');
+const seek = $('#seek'), tc = $('#tc');
+const playBtn = $('#play'), playIcon = $('#playIcon');
+const resetBtn = $('#resetZoom');
+const ICON_PLAY = 'M7 4v16l13-8z', ICON_PAUSE = 'M6 4h4v16H6zM14 4h4v16h-4z';
+let fps = 30, offset = 0, seeking = false;
+
+function loadSrc(k, src, name) {
+  const v = k === 'A' ? A : B;
+  if (v.src.startsWith('blob:')) URL.revokeObjectURL(v.src);
+  v.src = src;
+  $('#name' + k).textContent = name;
+  $('#tag' + k).textContent = (k === 'A' ? 'Original: ' : 'Enhanced: ') + name;
+  const zone = $(`.zone[data-k="${k}"]`, intake);
+  zone.classList.add('loaded');
+  zone.querySelector('p').innerHTML = '<span class="file"></span>';
+  zone.querySelector('.file').textContent = name;
+  if (A.src && B.src) intake.classList.add('done');
+}
+function load(k, file) { if (file) loadSrc(k, URL.createObjectURL(file), file.name); }
+$$('#screen-compare input[type=file]').forEach(i =>
+  i.addEventListener('change', e => load(e.target.dataset.k, e.target.files[0])));
+
+const isVideo = f => f.type.startsWith('video/') || /\.(mkv|mp4|webm|mov|m4v|avi)$/i.test(f.name);
+$$('.zone', intake).forEach(z => {
+  z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); });
+  z.addEventListener('dragleave', () => z.classList.remove('over'));
+  z.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation(); z.classList.remove('over');
+    const files = [...e.dataTransfer.files].filter(isVideo);
+    if (files.length >= 2) { load('A', files[0]); load('B', files[1]); }
+    else load(z.dataset.k, files[0]);
+  });
+});
+// Once both are loaded, dropping a file on either half of the picture replaces that side.
+stage.addEventListener('dragover', e => e.preventDefault());
+stage.addEventListener('drop', e => {
+  e.preventDefault();
+  const files = [...e.dataTransfer.files].filter(isVideo);
+  if (files.length >= 2) { load('A', files[0]); load('B', files[1]); return; }
+  const r = stage.getBoundingClientRect();
+  load(e.clientX - r.left < r.width / 2 ? 'A' : 'B', files[0]);
+});
+
+function setMode(m) {
+  stage.classList.remove('slider', 'side', 'toggle', 'showB');
+  stage.classList.add(m);
+  $$('.modes button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+}
+$('.modes').addEventListener('click', e => { if (e.target.dataset.mode) setMode(e.target.dataset.mode); });
+
+let dragDivider = false;
+function setSplit(x) {
+  const r = stage.getBoundingClientRect();
+  stage.style.setProperty('--split', Math.min(100, Math.max(0, (x - r.left) / r.width * 100)) + '%');
+}
+$('#divider').addEventListener('pointerdown', e => { dragDivider = true; e.stopPropagation(); });
+
+// Zoom & pan, applied to both videos identically
+let z = 1, tx = 0, ty = 0, panning = false, lastX, lastY;
+function applyZoom() {
+  $$('.zoomer').forEach(el => el.style.transform = `translate(${tx}px,${ty}px) scale(${z})`);
+  resetBtn.hidden = z === 1;
+}
+stage.addEventListener('wheel', e => {
+  if (intake.contains(e.target)) return;
+  e.preventDefault();
+  const r = (e.target.closest('.view') || stage).getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const nz = Math.min(20, Math.max(1, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  tx = mx - (mx - tx) * nz / z; ty = my - (my - ty) * nz / z; z = nz;
+  if (z === 1) tx = ty = 0;
+  applyZoom();
+}, { passive: false });
+stage.addEventListener('pointerdown', e => {
+  if (intake.contains(e.target)) return;
+  if (stage.classList.contains('slider') && z === 1) { dragDivider = true; setSplit(e.clientX); return; }
+  panning = true; lastX = e.clientX; lastY = e.clientY;
+});
+window.addEventListener('pointermove', e => {
+  if (dragDivider) setSplit(e.clientX);
+  else if (panning) { tx += e.clientX - lastX; ty += e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; applyZoom(); }
+});
+window.addEventListener('pointerup', () => { dragDivider = panning = false; });
+resetBtn.onclick = () => { z = 1; tx = ty = 0; applyZoom(); };
+
+// Playback sync (A leads, B follows)
+function timecode(t) {
+  t = Math.max(0, t || 0);
+  const s = Math.floor(t), f = Math.min(Math.floor((t - s) * fps), Math.round(fps) - 1);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}:${p(f)}`;
+}
+const lead = () => A.src ? A : B;
+function syncB(force) {
+  if (!A.src || !B.src) return;
+  const target = A.currentTime + offset;
+  if (force || Math.abs(B.currentTime - target) > 0.06) B.currentTime = Math.max(0, target);
+}
+function setPlaying(on) {
+  playIcon.setAttribute('d', on ? ICON_PAUSE : ICON_PLAY);
+  playBtn.setAttribute('aria-label', on ? 'Pause' : 'Play');
+}
+function play() {
+  const vids = [A, B].filter(v => v.src);
+  if (!vids.length) return;
+  if (lead().paused) { syncB(true); vids.forEach(v => v.play()); setPlaying(true); }
+  else { vids.forEach(v => v.pause()); syncB(true); setPlaying(false); }
+}
+function step(dir) {
+  [A, B].forEach(v => v.pause()); setPlaying(false);
+  const m = lead();
+  m.currentTime = Math.max(0, m.currentTime + dir / fps);
+  syncB(true);
+}
+playBtn.onclick = play;
+$('#back').onclick = () => step(-1);
+$('#fwd').onclick = () => step(1);
+$('#speed').onchange = e => { A.playbackRate = B.playbackRate = +e.target.value; };
+$('#fps').onchange = e => { fps = +e.target.value; };
+$('#offset').oninput = e => { offset = +e.target.value || 0; syncB(true); };
+const audioSel = $('#audio');
+function applyAudio() { A.muted = audioSel.value !== 'A'; B.muted = audioSel.value !== 'B'; }
+audioSel.onchange = applyAudio; applyAudio();
+
+seek.addEventListener('input', () => {
+  seeking = true;
+  const m = lead();
+  if (m.duration) { m.currentTime = seek.value / 1000 * m.duration; syncB(true); }
+});
+seek.addEventListener('change', () => seeking = false);
+A.addEventListener('ended', () => setPlaying(false));
+
+(function loop() {
+  const m = lead();
+  if (!m.paused) syncB(false);
+  if (m.duration) {
+    if (!seeking) seek.value = m.currentTime / m.duration * 1000;
+    tc.firstChild.textContent = timecode(m.currentTime);
+    tc.lastChild.textContent = 'of ' + timecode(m.duration);
+  }
+  requestAnimationFrame(loop);
+})();
+
+window.addEventListener('keydown', e => {
+  if (currentScreen !== 'compare' || $('#picker').open) return;
+  if (e.target.matches('input[type=number], select')) return;
+  if (e.code === 'Space') { e.preventDefault(); play(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+  else if (e.key.toLowerCase() === 'f') {
+    if (!stage.classList.contains('toggle')) setMode('toggle');
+    else stage.classList.toggle('showB');
+  }
+});
+
+function compareJob(job) {
+  loadSrc('A', fileUrl(job.input), baseName(job.input));
+  loadSrc('B', fileUrl(job.output), baseName(job.output));
+  setPlaying(false);
+  showScreen('compare');
+}
+
+/* =================== helper connection =================== */
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} :
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `The helper answered with an error (${r.status}).`);
+  return data;
+}
+const state = { online: false, settings: {}, input: { convert: null, enhance: null } };
+
+/* =================== folder and file picker =================== */
+const pk = { dlg: $('#picker'), mode: 'folder', path: '', parent: null, selected: null, resolve: null };
+const ICON_DIR = '<svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const ICON_FILE = '<svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm6 4v6l5-3z"/></svg>';
+
+function pick({ mode, title, start }) {
+  Object.assign(pk, { mode, selected: null });
+  $('#pkTitle').textContent = title;
+  $('#pkOk').textContent = mode === 'file' ? 'Use this video' : 'Save here';
+  $('#pkNew').hidden = mode === 'file';
+  $('#pkMsg').textContent = '';
+  pk.dlg.showModal();
+  browseTo(start || '');
+  return new Promise(res => { pk.resolve = res; });
+}
+function finishPick(value) {
+  const res = pk.resolve; pk.resolve = null;
+  if (pk.dlg.open) pk.dlg.close();
+  if (res) res(value);
+}
+pk.dlg.addEventListener('close', () => finishPick(null));
+
+async function browseTo(path) {
+  try {
+    const d = await api('/api/browse?' + new URLSearchParams({ path, files: pk.mode === 'file' ? 1 : 0 }));
+    pk.path = d.path; pk.parent = d.parent; pk.selected = null;
+    $('#pkPath').value = d.path;
+    $('#pkUp').disabled = !d.parent;
+    $('#pkMsg').textContent = '';
+    const items = d.dirs.map(n => `<li><button type="button" class="pk-item dir" data-dir="${esc(n)}">${ICON_DIR}<span>${esc(n)}</span></button></li>`)
+      .concat(d.files.map(f => `<li><button type="button" class="pk-item file" role="option" aria-selected="false" data-file="${esc(f.name)}">${ICON_FILE}<span>${esc(f.name)}</span><small>${fmtBytes(f.size)}</small></button></li>`));
+    $('#pkList').innerHTML = items.join('') ||
+      `<li class="pk-empty">${pk.mode === 'file' ? 'No videos or folders here.' : 'No folders inside this one. You can save here or make a new folder.'}</li>`;
+    renderPlaces(d.places);
+    updatePickOk();
+  } catch (e) { $('#pkMsg').textContent = e.message; }
+}
+function renderPlaces(places) {
+  const s = state.settings, recent = [];
+  for (const p of [...(s.recent?.convert || []), ...(s.recent?.enhance || []), s.lastInputDir])
+    if (p && !recent.includes(p)) recent.push(p);
+  const btn = p => `<button type="button" data-path="${esc(p.path)}" title="${esc(p.path)}">${esc(p.name)}</button>`;
+  $('#pkPlaces').innerHTML = '<p>Places</p>' + places.map(btn).join('') +
+    (recent.length ? '<p>Used recently</p>' + recent.slice(0, 8).map(p => btn({ path: p, name: baseName(p) })).join('') : '');
+}
+const joinPath = (dir, name) => dir.replace(/\/+$/, '') + '/' + name;
+function updatePickOk() { $('#pkOk').disabled = pk.mode === 'file' && !pk.selected; }
+
+$('#pkList').addEventListener('click', e => {
+  const b = e.target.closest('.pk-item'); if (!b) return;
+  if (b.dataset.dir !== undefined) return browseTo(joinPath(pk.path, b.dataset.dir));
+  pk.selected = b.dataset.file;
+  $$('.pk-item.file').forEach(x => x.setAttribute('aria-selected', x === b));
+  updatePickOk();
+});
+$('#pkList').addEventListener('dblclick', e => {
+  const b = e.target.closest('.pk-item.file');
+  if (b) finishPick(joinPath(pk.path, b.dataset.file));
+});
+$('#pkPlaces').addEventListener('click', e => { const b = e.target.closest('button'); if (b) browseTo(b.dataset.path); });
+$('#pkUp').onclick = () => pk.parent && browseTo(pk.parent);
+$('#pkGo').onclick = () => browseTo($('#pkPath').value.trim());
+$('#pkPath').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); browseTo(e.target.value.trim()); } });
+$('#pkOk').onclick = () => finishPick(pk.mode === 'file' ? joinPath(pk.path, pk.selected) : pk.path);
+$('#pkNew').onclick = async () => {
+  const name = prompt('Name for the new folder');
+  if (!name) return;
+  try { const d = await api('/api/mkdir', { path: pk.path, name }); browseTo(d.path); }
+  catch (e) { $('#pkMsg').textContent = e.message; }
+};
+
+/* =================== convert & enhance forms =================== */
+const forms = { convert: $('#form-convert'), enhance: $('#form-enhance') };
+
+function readOpts(kind) {
+  const f = forms[kind], o = {};
+  $$('input', f).forEach(i => {
+    const key = i.name.split('-')[1];
+    if (i.type === 'radio' && i.checked) o[key] = /^\d+$/.test(i.value) ? +i.value : i.value;
+    if (i.type === 'checkbox') o[key] = i.checked;
+  });
+  return o;
+}
+function applyOpts(kind, o) {
+  if (!o) return;
+  $$('input', forms[kind]).forEach(i => {
+    const v = o[i.name.split('-')[1]];
+    if (v === undefined) return;
+    if (i.type === 'radio') i.checked = String(v) === i.value;
+    if (i.type === 'checkbox') i.checked = !!v;
+  });
+}
+
+function plan(kind) {
+  const i = state.input[kind]; if (!i) return null;
+  const o = readOpts(kind);
+  const dot = i.name.lastIndexOf('.');
+  const stem = dot > 0 ? i.name.slice(0, dot) : i.name;
+  const ext = /\.(mp4|mov|m4v)$/i.test(i.name) ? '.mp4' : '.mkv';
+  if (kind === 'convert') {
+    const h = o.height, w = Math.round(i.width * h / i.height / 2) * 2;
+    return { name: `${stem}_${h}p${ext}`, w, h, format: o.codec === 'hevc' ? 'H.265' : 'H.264' };
+  }
+  const s = o.scale;
+  return { name: `${stem}_enhanced_x${s}${ext}`, w: Math.floor(i.width * s / 2) * 2, h: Math.floor(i.height * s / 2) * 2, format: state.status?.encoders?.enhance?.format || 'H.265' };
+}
+
+function refresh(kind) {
+  const f = forms[kind], i = state.input[kind];
+  const inName = $('.slate-in .slate-name', f), inMeta = $('.slate-in .slate-meta', f);
+  if (i) {
+    inName.textContent = i.name; inName.classList.remove('empty');
+    inMeta.classList.remove('error');
+    inMeta.textContent = `${i.width} × ${i.height}, ${+i.fps.toFixed(3)} fps, ${fmtLength(i.duration)} long, ${fmtBytes(i.size)}`;
+  }
+
+  if (kind === 'convert') {
+    const radios = $$('input[name="convert-height"]', f);
+    let anyOff = false;
+    radios.forEach(r => { r.disabled = !!i && +r.value > i.height; anyOff ||= r.disabled; });
+    if (radios.find(r => r.checked)?.disabled) radios.find(r => !r.disabled).checked = true;
+    $('[data-role="size-note"]', f).hidden = !anyOff;
+  }
+
+  const p = plan(kind), dest = state.settings.dest?.[kind] || '';
+  const outName = $('.slate-out .slate-name', f), outMeta = $('.slate-out .slate-meta', f);
+  const where = dest ? `in ${dest}` : 'next to the original video';
+  if (p) {
+    outName.textContent = p.name; outName.classList.remove('empty');
+    outMeta.textContent = `${p.w} × ${p.h}, ${p.format}. Saved ${where}.`;
+  } else {
+    outMeta.textContent = `Saved ${where}.`;
+  }
+
+  const recent = state.settings.recent?.[kind] || [];
+  $('.dest-chips', f).innerHTML = [''].concat(recent).map(path =>
+    `<button type="button" class="chip" data-dest="${esc(path)}" aria-pressed="${path === dest}" title="${esc(path || 'Save next to the original video')}">${esc(path ? baseName(path) : 'Next to the original')}</button>`).join('');
+
+  const go = $('.go', f), o = readOpts(kind);
+  if (kind === 'convert') go.textContent = `Convert to ${o.height === 2160 ? '4K' : o.height + 'p'}`;
+  if (kind === 'enhance') {
+    go.disabled = !i || !!state.status?.enhanceProblem;
+    const note = $('[data-role="scale-note"]', f);
+    note.textContent = p ? `${i.width} × ${i.height} becomes ${p.w} × ${p.h}.` : '';
+    // Frames are stored as PNGs while enhancing: the originals plus the upscaled copies (real footage is always made at 4×).
+    const space = $('[data-role="space-note"]', f);
+    if (i) {
+      const r = o.model === 'real' ? 4 : o.scale;
+      const need = i.frames * i.width * i.height * (1 + r * r) * 1.5;
+      const short = need > i.workFree * 0.95;
+      space.hidden = false;
+      space.classList.toggle('warn', short);
+      space.textContent = `While working, the frames need about ${fmtBytes(need)} of temporary space on the SSD. ${fmtBytes(i.workFree)} is free.` +
+        (short ? ' That may not be enough: free up space or pick a shorter video.' : '');
+    } else space.hidden = true;
+  } else {
+    go.disabled = !i || !!state.status?.convertProblem;
+  }
+}
+
+let saveTimer;
+Object.entries(forms).forEach(([kind, f]) => {
+  f.addEventListener('change', () => {
+    refresh(kind);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => api('/api/settings', { options: { [kind]: readOpts(kind) } }).catch(() => {}), 400);
+  });
+
+  f.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.act === 'pick-input') {
+      const path = await pick({ mode: 'file', title: kind === 'convert' ? 'Choose a video to convert' : 'Choose a video to enhance', start: state.input[kind]?.dir || state.settings.lastInputDir });
+      if (path) chooseInput(kind, path);
+    } else if (b.dataset.act === 'pick-dest') {
+      const path = await pick({ mode: 'folder', title: 'Choose where to save', start: state.settings.dest?.[kind] || state.input[kind]?.dir });
+      if (path) setDest(kind, path);
+    } else if (b.dataset.dest !== undefined) {
+      setDest(kind, b.dataset.dest);
+    }
+  });
+
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    const i = state.input[kind], msg = $('.go-msg', f), go = $('.go', f);
+    if (!i) return;
+    go.disabled = true; msg.classList.remove('error'); msg.textContent = 'Adding to the queue…';
+    try {
+      await api('/api/jobs', { type: kind, input: i.path, dest: state.settings.dest?.[kind] || '', options: readOpts(kind) });
+      msg.textContent = 'Added to the queue. Progress shows on the right.';
+      askToNotify();
+      pollJobs();
+    } catch (err) {
+      msg.classList.add('error'); msg.textContent = err.message;
+    } finally { refresh(kind); }
+  });
+});
+
+async function chooseInput(kind, path) {
+  const f = forms[kind], meta = $('.slate-in .slate-meta', f);
+  meta.classList.remove('error'); meta.textContent = 'Reading video details…';
+  try {
+    state.input[kind] = await api('/api/probe?' + new URLSearchParams({ path }));
+    api('/api/settings', { lastInputDir: state.input[kind].dir }).then(s => state.settings = s).catch(() => {});
+  } catch (e) {
+    state.input[kind] = null;
+    const name = $('.slate-in .slate-name', f);
+    name.textContent = baseName(path); name.classList.remove('empty');
+    meta.classList.add('error'); meta.textContent = e.message;
+  }
+  refresh(kind);
+}
+async function setDest(kind, path) {
+  try { state.settings = await api('/api/settings', { dest: { [kind]: path } }); }
+  catch (e) { const m = $('.go-msg', forms[kind]); m.classList.add('error'); m.textContent = e.message; }
+  refresh(kind);
+}
+
+/* =================== queue =================== */
+const WORDS = {
+  convert: { queued: 'Waiting to convert', running: 'Converting', done: 'Converted', failed: "Couldn't convert", canceled: 'Conversion canceled' },
+  enhance: { queued: 'Waiting to enhance', running: 'Enhancing', done: 'Enhanced', failed: "Couldn't enhance", canceled: 'Enhancement canceled' },
+};
+let lastStatus = {};
+
+function jobEl(j) {
+  const el = document.createElement('article');
+  el.dataset.id = j.id;
+  el.innerHTML = `
+    <div class="job-head"><span class="job-status"></span><span class="job-actions"></span></div>
+    <div class="job-files"><span class="in"></span><span class="out"></span></div>
+    <div class="readout"><span class="pct"></span><span class="eta"></span></div>
+    <div class="meter"><i></i></div>
+    ${j.type === 'enhance' ? '<ol class="steps"></ol>' : ''}
+    <p class="job-detail"></p>
+    <p class="job-error"></p>`;
+  return el;
+}
+function updateJobEl(el, j) {
+  el.className = `job ${j.status}`;
+  $('.job-status', el).textContent = WORDS[j.type][j.status];
+  const fin = $('.job-files .in', el), fout = $('.job-files .out', el);
+  fin.textContent = baseName(j.input); fin.title = j.input;
+  fout.textContent = `${baseName(j.output)} (${j.spec})`; fout.title = j.output;
+
+  const running = j.status === 'running', active = running || j.status === 'queued';
+  const pct = j.percent * 100;
+  $('.pct', el).innerHTML = `${j.status === 'done' ? 100 : running && pct < 99.95 && j.type === 'enhance' ? pct.toFixed(1) : Math.floor(pct)}<small>%</small>`;
+  $('.eta', el).textContent =
+    j.status === 'queued' ? 'Starts when the job ahead finishes' :
+    running ? (j.eta != null ? `About ${fmtDur(j.eta)} left` : j.percent === 0 ? 'Starting…' : 'Working out the time left…') :
+    j.status === 'done' ? `Took ${fmtDur(j.finished - j.started)}` : '';
+  $('.readout', el).hidden = $('.meter', el).hidden = j.status === 'failed';
+  $('.meter i', el).style.width = (j.status === 'done' ? 100 : pct) + '%';
+
+  const steps = $('.steps', el);
+  if (steps) {
+    steps.hidden = !active;
+    steps.innerHTML = j.stages.map(s =>
+      `<li class="${s.state}">${esc(s.name)}${s.state === 'running' && s.detail ? ` <span>${esc(s.detail)}</span>` : ''}</li>`).join('');
+  }
+  const detail = $('.job-detail', el);
+  detail.textContent = j.type === 'convert' && running ? j.detail : '';
+  detail.hidden = !detail.textContent;
+  const err = $('.job-error', el);
+  err.textContent = j.error; err.hidden = !j.error;
+
+  if (el.dataset.status !== j.status) {
+    el.dataset.status = j.status;
+    $('.job-actions', el).innerHTML =
+      active ? '<button data-act="cancel">Cancel</button>' :
+      j.status === 'done' ? '<button class="primary" data-act="compare">Compare with original</button><button data-act="reveal">Open folder</button><button data-act="remove">Remove</button>' :
+      '<button data-act="remove">Remove</button>';
+  }
+}
+function renderJobs(list) {
+  $$('.jobs').forEach(box => {
+    if (!list.length) {
+      box.innerHTML = '<p class="jobs-empty">Nothing in the queue. Videos you convert or enhance show up here with their progress.</p>';
+      return;
+    }
+    $('.jobs-empty', box)?.remove();
+    const ids = new Set(list.map(j => j.id));
+    $$('.job', box).forEach(c => { if (!ids.has(c.dataset.id)) c.remove(); });
+    list.forEach((j, idx) => {
+      let el = $(`.job[data-id="${j.id}"]`, box) || jobEl(j);
+      if (box.children[idx] !== el) box.insertBefore(el, box.children[idx] || null);
+      updateJobEl(el, j);
+    });
+  });
+  const active = list.filter(j => j.status === 'running' || j.status === 'queued');
+  $$('.tabs .count').forEach(c => c.remove());
+  ['convert', 'enhance'].forEach(kind => {
+    const n = active.filter(j => j.type === kind).length;
+    if (n) $(`.tabs [data-screen="${kind}"]`).insertAdjacentHTML('beforeend', `<span class="count" aria-label="${n} in the queue">${n}</span>`);
+  });
+  const run = list.find(j => j.status === 'running');
+  document.title = run ? `${Math.floor(run.percent * 100)}% ${WORDS[run.type].running.toLowerCase()} – Local Video Deck` : 'Local Video Deck';
+}
+
+let jobs = [];
+async function pollJobs() {
+  if (!state.online) return;
+  try {
+    jobs = (await api('/api/jobs')).jobs;
+    for (const j of jobs) {
+      const before = lastStatus[j.id];
+      if (before && before !== j.status && (j.status === 'done' || j.status === 'failed')) notify(j);
+      lastStatus[j.id] = j.status;
+    }
+    renderJobs(jobs);
+  } catch {}
+}
+$$('.jobs').forEach(box => box.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const id = b.closest('.job').dataset.id, j = jobs.find(x => x.id === id);
+  if (!j) return;
+  try {
+    if (b.dataset.act === 'compare') compareJob(j);
+    else if (b.dataset.act === 'reveal') await api('/api/reveal', { path: j.output });
+    else { await api(`/api/jobs/${id}/${b.dataset.act}`, {}); pollJobs(); }
+  } catch (err) { alert(err.message); }
+}));
+
+function askToNotify() {
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+}
+function notify(j) {
+  if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+  new Notification(`${WORDS[j.type][j.status]}: ${baseName(j.input)}`, { body: j.status === 'done' ? `Saved as ${baseName(j.output)}` : j.error });
+}
+
+/* =================== start =================== */
+// Says what each tool runs on, and why a tool can't run when something is missing.
+function showHardware(st) {
+  for (const kind of ['convert', 'enhance']) {
+    const note = $('[data-role="problem"]', forms[kind]), problem = st[kind + 'Problem'];
+    note.textContent = problem || ''; note.hidden = !problem;
+  }
+  const enc = st.encoders || {};
+  const where = e => e?.gpu ? 'your NVIDIA graphics card' : 'the processor, which is slower than a graphics card';
+  const hevc = $('input[name="convert-codec"][value="hevc"]');
+  hevc.disabled = !enc.hevc;
+  if (hevc.disabled && hevc.checked) $('input[name="convert-codec"][value="h264"]').checked = true;
+  $('[data-role="encoder-note"]').textContent = enc.h264 ?
+    `Encoding runs on ${where(enc.h264)}.` + (enc.hevc ? '' : ' H.265 is off because your ffmpeg can\'t encode it.') : '';
+  $('[data-role="gpu-note"]').textContent = st.gpuName ? `Upscaling runs on ${st.gpuName}.` : '';
+}
+
+(async function init() {
+  try { showScreen(localStorage.getItem('screen') || 'compare'); } catch { showScreen('compare'); }
+  try {
+    state.status = await api('/api/status');
+    state.settings = await api('/api/settings');
+    state.online = true;
+  } catch { state.online = false; }
+  $$('.offline').forEach(el => el.hidden = state.online);
+  $$('.tool-grid').forEach(el => el.hidden = !state.online);
+  if (!state.online) return;
+  showHardware(state.status);
+  for (const kind of ['convert', 'enhance']) { applyOpts(kind, state.settings.options?.[kind]); refresh(kind); }
+  renderJobs([]);
+  pollJobs();
+  setInterval(pollJobs, 1000);
+})();
+</script>
+</body>
+</html>

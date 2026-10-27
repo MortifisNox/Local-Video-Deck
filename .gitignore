@@ -1,0 +1,11 @@
+# Downloaded by start.sh
+tools/
+# Temporary frames while enhancing
+.work/
+# Your remembered folders and options
+settings.json
+settings.tmp
+# Your own videos, if you keep them here
+videos/
+__pycache__/
+*.pyc
